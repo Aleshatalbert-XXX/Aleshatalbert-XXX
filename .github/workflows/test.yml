@@ -1,0 +1,71 @@
+name: CI Pipeline
+
+on:
+  - push
+  - pull_request
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, oldstable]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust ${{ matrix.rust }} with dependency cache
+        uses: actions/setup-rust@v1
+        with:
+          rust-version: ${{ matrix.rust }}
+          cache: ${{ hashFiles('Cargo.lock') != '' && 'cargo' || '' }}
+
+      - name: Install dependencies
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo fetch --locked
+        shell: bash
+
+      - name: Check formatting
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo fmt --all -- --check
+        shell: bash
+
+      - name: Run Clippy checks
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        shell: bash
+
+      - name: Build and typecheck
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo check --all-targets --all-features
+        shell: bash
+
+      - name: Run unit and integration tests
+        if: hashFiles('Cargo.toml') != ''
+        run: cargo test --all-targets --all-features
+        shell: bash
+
+      - name: Write pipeline summary
+        if: always()
+        shell: bash
+        env:
+          CHECK_FORMAT_OUTCOME: ${{ steps.check-format.outcome }}
+          CLIPPY_OUTCOME: ${{ steps.clippy.outcome }}
+          BUILD_TYPECHECK_OUTCOME: ${{ steps.build-typecheck.outcome }}
+          TEST_OUTCOME: ${{ steps.unit-integration-tests.outcome }}
+        run: |
+          printf '## CI summary\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Check | Outcome |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Check formatting | %s |\n' "$CHECK_FORMAT_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Clippy checks | %s |\n' "$CLIPPY_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Build and typecheck | %s |\n' "$BUILD_TYPECHECK_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Unit and integration tests | %s |\n' "$TEST_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
